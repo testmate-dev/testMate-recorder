@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Testmate Recorder</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "IBM Plex Sans", "Segoe UI", Arial, sans-serif;
+      }
+      body {
+        margin: 0;
+        padding: 14px;
+        width: 520px;
+        min-height: 420px;
+        background: #f7f5f2;
+        color: #1f1f1f;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 12px;
+      }
+      h1 {
+        font-size: 16px;
+        margin: 0;
+        letter-spacing: 0.3px;
+      }
+      .status {
+        font-size: 12px;
+        color: #555;
+      }
+      .actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+      button {
+        font-size: 13px;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid #d6d2cc;
+        background: #ffffff;
+        cursor: pointer;
+      }
+      button.primary {
+        background: #1f5d50;
+        color: #fff;
+        border-color: #1f5d50;
+      }
+      button.stop {
+        background: #b23b3b;
+        color: #fff;
+        border-color: #b23b3b;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .steps {
+        background: #fff;
+        border: 1px solid #e2ddd5;
+        border-radius: 10px;
+        padding: 10px;
+        max-height: 420px;
+        overflow: auto;
+        font-size: 12px;
+      }
+      .step {
+        padding: 7px 6px;
+        border-bottom: 1px dashed #eee6dc;
+        line-height: 1.35;
+      }
+      .step:last-child {
+        border-bottom: none;
+      }
+      .empty {
+        color: #777;
+        font-style: italic;
+      }
+      .hint {
+        font-size: 11px;
+        color: #666;
+        margin-top: 8px;
+      }
+      .modal {
+        position: fixed;
+        inset: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+      }
+      .modal.show {
+        display: flex;
+      }
+      .modal-backdrop {
+        position: absolute;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.25);
+      }
+      .modal-card {
+        position: relative;
+        z-index: 1;
+        background: #fff;
+        border: 1px solid #e2ddd5;
+        border-radius: 12px;
+        padding: 14px;
+        width: 420px;
+        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.15);
+      }
+      .modal-title {
+        font-size: 14px;
+        margin-bottom: 8px;
+      }
+      .modal-label {
+        display: block;
+        font-size: 12px;
+        color: #555;
+        margin-bottom: 6px;
+      }
+      .modal-input {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 8px 10px;
+        border-radius: 8px;
+        border: 1px solid #d6d2cc;
+        font-size: 13px;
+      }
+      .modal-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 12px;
+      }
+      .modal-check {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 10px;
+        font-size: 12px;
+        color: #444;
+      }
+      .modal-check input {
+        transform: translateY(1px);
+      }
+      .tip {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        border: 1px solid #c9c4bd;
+        font-size: 11px;
+        color: #555;
+        background: #f7f5f2;
+        cursor: default;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Testmate Recorder</h1>
+      <div class="status" id="status">Idle</div>
+    </header>
+
+    <div class="actions">
+      <button id="start" class="primary">Record</button>
+      <button id="stop" class="stop">Stop</button>
+      <button id="clear">Clear</button>
+    </div>
+
+    <div class="steps" id="steps"></div>
+    <div class="hint">Recording opens in a new browser window.</div>
+
+    <div class="modal" id="modal" aria-hidden="true">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card">
+        <div class="modal-title">Start Recording</div>
+        <label class="modal-label" for="start-url">Start URL</label>
+        <input id="start-url" class="modal-input" placeholder="https://example.com" />
+        <div class="modal-actions">
+          <button id="cancel-start">Cancel</button>
+          <button id="confirm-start" class="primary">Start</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="assets/ui.js"></script>
+  </body>
+</html>
