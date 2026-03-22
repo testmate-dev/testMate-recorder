@@ -27,6 +27,9 @@ const recordedSteps = []
 let activeSessionId = null
 let isRecording = false
 let uiWindowId = null
+const MIN_UI_WINDOW_WIDTH = 560
+const MIN_UI_WINDOW_HEIGHT = 640
+let isUpdatingUiWindowBounds = false
 
 const record = (command, target, value, insertBeforeLastCommand) => {
   window.hasRecorded = true
@@ -157,6 +160,26 @@ const clear = () => {
   return { ok: true }
 }
 
+const replaceSteps = nextSteps => {
+  if (!Array.isArray(nextSteps)) {
+    return { ok: false, error: 'Steps payload must be an array.' }
+  }
+  recordedSteps.length = 0
+  nextSteps.forEach(step => {
+    if (!step || typeof step.command !== 'string') return
+    recordedSteps.push({
+      command: step.command,
+      target: step.target,
+      value: step.value,
+      insertBeforeLastCommand: step.insertBeforeLastCommand,
+    })
+  })
+  return {
+    ok: true,
+    steps: recordedSteps.slice(),
+  }
+}
+
 const openUiWindow = async () => {
   if (uiWindowId) {
     try {
@@ -169,11 +192,43 @@ const openUiWindow = async () => {
   const win = await browser.windows.create({
     url: browser.runtime.getURL('ui.html'),
     type: 'popup',
-    width: 560,
-    height: 640,
+    width: MIN_UI_WINDOW_WIDTH,
+    height: MIN_UI_WINDOW_HEIGHT,
   })
   uiWindowId = win.id
 }
+
+browser.windows.onBoundsChanged.addListener(async win => {
+  if (!uiWindowId || win.id !== uiWindowId || isUpdatingUiWindowBounds) {
+    return
+  }
+
+  const nextWidth = Math.max(win.width || MIN_UI_WINDOW_WIDTH, MIN_UI_WINDOW_WIDTH)
+  const nextHeight = Math.max(
+    win.height || MIN_UI_WINDOW_HEIGHT,
+    MIN_UI_WINDOW_HEIGHT
+  )
+
+  if (nextWidth === win.width && nextHeight === win.height) {
+    return
+  }
+
+  isUpdatingUiWindowBounds = true
+  try {
+    await browser.windows.update(uiWindowId, {
+      width: nextWidth,
+      height: nextHeight,
+    })
+  } finally {
+    isUpdatingUiWindowBounds = false
+  }
+})
+
+browser.windows.onRemoved.addListener(windowId => {
+  if (windowId === uiWindowId) {
+    uiWindowId = null
+  }
+})
 
 browser.browserAction.onClicked.addListener(() => {
   openUiWindow()
@@ -252,6 +307,9 @@ browser.runtime.onMessage.addListener(message => {
   if (message.tmrRecorder === 'clear') {
     return Promise.resolve(clear())
   }
+  if (message.tmrRecorder === 'replaceSteps') {
+    return Promise.resolve(replaceSteps(message.steps))
+  }
 })
 
 window.tmrApi = {
@@ -260,4 +318,5 @@ window.tmrApi = {
   status,
   steps,
   clear,
+  replaceSteps,
 }

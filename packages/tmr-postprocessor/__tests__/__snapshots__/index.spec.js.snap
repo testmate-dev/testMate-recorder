@@ -1,4 +1,4 @@
-// Jest Snapshot v1, https://goo.gl/fbAQLP
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
 
 exports[`recorder postprocessor recording should add \`store window handle\` to be able to switch back to the root window 1`] = `
 Array [
