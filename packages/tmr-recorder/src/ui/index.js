@@ -1,3 +1,7 @@
+import { icon } from '@fortawesome/fontawesome-svg-core'
+import { faTrashCan } from '@fortawesome/free-regular-svg-icons'
+import { faGripLines } from '@fortawesome/free-solid-svg-icons'
+
 const api = typeof browser !== 'undefined' ? browser : chrome
 
 const statusEl = document.getElementById('status')
@@ -7,6 +11,7 @@ const stopBtn = document.getElementById('stop')
 const clearBtn = document.getElementById('clear')
 const modal = document.getElementById('modal')
 const startUrlInput = document.getElementById('start-url')
+const clearSiteDataInput = document.getElementById('clear-site-data')
 const cancelStartBtn = document.getElementById('cancel-start')
 const confirmStartBtn = document.getElementById('confirm-start')
 
@@ -17,6 +22,9 @@ let draggingStepId = null
 let dragStartOrder = ''
 let pendingClientY = null
 let moveRafId = null
+let lastStepsFingerprint = ''
+let refreshInFlight = false
+let refreshQueued = false
 
 const stepKey = step =>
   JSON.stringify([
@@ -56,6 +64,8 @@ const stepText = (step, index) => {
   const value = step.value ? ` = ${step.value}` : ''
   return `${index + 1}. ${step.command} ${target || ''}${value}`.trim()
 }
+
+const iconHtml = faIcon => icon(faIcon).html.join('')
 
 const captureStepRects = () => {
   const rects = new Map()
@@ -104,15 +114,27 @@ const renderSteps = options => {
     text.className = 'step-text'
     text.textContent = stepText(step, index)
 
+    const controls = document.createElement('div')
+    controls.className = 'step-controls'
+
+    const deleteBtn = document.createElement('button')
+    deleteBtn.type = 'button'
+    deleteBtn.className = 'step-delete'
+    deleteBtn.dataset.stepId = step._uiId
+    deleteBtn.setAttribute('aria-label', 'Delete step')
+    deleteBtn.title = 'Delete step'
+    deleteBtn.innerHTML = iconHtml(faTrashCan)
+
     const handle = document.createElement('button')
     handle.type = 'button'
     handle.className = 'step-handle'
     handle.dataset.stepId = step._uiId
     handle.setAttribute('aria-label', 'Drag to reorder step')
     handle.title = 'Drag to reorder'
-    handle.textContent = '::'
+    handle.innerHTML = iconHtml(faGripLines)
 
-    row.append(text, handle)
+    controls.append(deleteBtn, handle)
+    row.append(text, controls)
     fragment.appendChild(row)
   })
   stepsEl.appendChild(fragment)
@@ -156,6 +178,18 @@ const serializeStepsForSave = () =>
     value: step.value,
     insertBeforeLastCommand: step.insertBeforeLastCommand,
   }))
+
+const fingerprintSteps = steps => {
+  if (!Array.isArray(steps)) return ''
+  return JSON.stringify(
+    steps.map(step => [
+      step.command,
+      step.target,
+      step.value,
+      step.insertBeforeLastCommand,
+    ])
+  )
+}
 
 const debugStepOrder = () =>
   uiSteps.map((step, index) => `${index + 1}:${step.command}:${step._uiId}`)
@@ -220,6 +254,27 @@ async function onDragMouseUp() {
   await finishDrag()
 }
 
+const removeStepById = async stepId => {
+  if (!stepId || isDragging) return
+  const index = indexByStepId(stepId)
+  if (index < 0) return
+
+  const [removed] = uiSteps.splice(index, 1)
+  renderSteps()
+
+  const result = await callBg('replaceSteps', serializeStepsForSave())
+  if (!result || result.ok === false) {
+    uiSteps.splice(index, 0, removed)
+    renderSteps()
+    const msg = (result && result.error) || 'Failed to delete step.'
+    alert(msg)
+    return
+  }
+
+  lastStepsFingerprint = fingerprintSteps(uiSteps)
+  await refresh()
+}
+
 const finishDrag = async () => {
   if (!isDragging) return
   const currentOrder = uiSteps.map(step => step._uiId).join('|')
@@ -238,6 +293,7 @@ const finishDrag = async () => {
   renderSteps()
   if (hasChanged) {
     await callBg('replaceSteps', serializeStepsForSave())
+    lastStepsFingerprint = fingerprintSteps(uiSteps)
     await refresh()
   }
 }
@@ -263,6 +319,13 @@ stepsEl.addEventListener('mousedown', event => {
   document.addEventListener('mousemove', onDragMove)
   document.addEventListener('mouseup', onDragMouseUp)
   syncDraggingClass()
+})
+
+stepsEl.addEventListener('click', async event => {
+  const deleteBtn = event.target.closest('.step-delete')
+  if (!deleteBtn) return
+  const stepId = deleteBtn.dataset.stepId
+  await removeStepById(stepId)
 })
 
 window.addEventListener('blur', async () => {
@@ -292,6 +355,11 @@ const callBg = async (method, ...args) => {
       if (method !== 'status' && method !== 'steps') {
         console.debug('[tmr-ui] calling', method, args)
       }
+      if (method === 'start') {
+        return await apiRef.start(args[0], args[1], {
+          clearSiteData: !!args[2],
+        })
+      }
       return await apiRef[method](...args)
     }
 
@@ -299,6 +367,7 @@ const callBg = async (method, ...args) => {
     if (method === 'start') {
       message.url = args[0]
       message.sessionId = args[1]
+      message.clearSiteData = !!args[2]
     }
     if (method === 'replaceSteps') {
       message.steps = args[0]
@@ -335,26 +404,48 @@ const callBg = async (method, ...args) => {
 }
 
 const refresh = async () => {
-  const status = await callBg('status')
-  const steps = await callBg('steps')
-  if (!status || status.ok === false) {
-    statusEl.textContent = 'Background unavailable'
-    startBtn.disabled = false
-    stopBtn.disabled = true
-    return
-  }
-  statusEl.textContent = status.isRecording ? 'Recording' : 'Idle'
-  startBtn.disabled = status.isRecording
-  stopBtn.disabled = !status.isRecording
-  if (!isDragging && steps && steps.ok !== false) {
-    uiSteps = assignUiIds(steps.steps)
-    renderSteps()
+  refreshInFlight = true
+  try {
+    const status = await callBg('status')
+    const steps = await callBg('steps')
+    if (!status || status.ok === false) {
+      statusEl.textContent = 'Background unavailable'
+      startBtn.disabled = false
+      stopBtn.disabled = true
+      return
+    }
+    statusEl.textContent = status.isRecording ? 'Recording' : 'Idle'
+    startBtn.disabled = status.isRecording
+    stopBtn.disabled = !status.isRecording
+    if (!isDragging && steps && steps.ok !== false) {
+      const nextStepsFingerprint = fingerprintSteps(steps.steps)
+      if (nextStepsFingerprint !== lastStepsFingerprint) {
+        uiSteps = assignUiIds(steps.steps)
+        lastStepsFingerprint = nextStepsFingerprint
+        renderSteps()
+      }
+    }
+  } finally {
+    refreshInFlight = false
+    if (refreshQueued) {
+      refreshQueued = false
+      void refresh()
+    }
   }
 }
 
-setInterval(() => {
-  refresh()
-}, 1000)
+const scheduleRefresh = () => {
+  if (refreshInFlight) {
+    refreshQueued = true
+    return
+  }
+  void refresh()
+}
+
+api.runtime.onMessage.addListener(message => {
+  if (!message || message.tmrRecorderEvent !== 'updated') return
+  scheduleRefresh()
+})
 
 startBtn.addEventListener('click', async () => {
   modal.classList.add('show')
@@ -379,8 +470,9 @@ cancelStartBtn.addEventListener('click', () => {
 
 confirmStartBtn.addEventListener('click', async () => {
   const url = startUrlInput.value.trim()
+  const clearSiteData = !!(clearSiteDataInput && clearSiteDataInput.checked)
   confirmStartBtn.disabled = true
-  const result = await callBg('start', url)
+  const result = await callBg('start', url, undefined, clearSiteData)
   confirmStartBtn.disabled = false
   if (!result || result.ok !== true) {
     const msg = (result && result.error) || 'Failed to start recording.'
@@ -392,4 +484,4 @@ confirmStartBtn.addEventListener('click', async () => {
   await refresh()
 })
 
-refresh()
+scheduleRefresh()
