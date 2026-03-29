@@ -21,6 +21,7 @@
   "permissions": [
     "tabs",
     "activeTab",
+    "browsingData",
     "webRequest",
     "webNavigation",
     "<all_urls>"

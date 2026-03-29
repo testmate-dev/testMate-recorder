@@ -31,6 +31,15 @@ const MIN_UI_WINDOW_WIDTH = 560
 const MIN_UI_WINDOW_HEIGHT = 640
 let isUpdatingUiWindowBounds = false
 
+const notifyUiUpdate = reason => {
+  browser.runtime
+    .sendMessage({
+      tmrRecorderEvent: 'updated',
+      reason,
+    })
+    .catch(() => {})
+}
+
 const record = (command, target, value, insertBeforeLastCommand) => {
   window.hasRecorded = true
   const payload = {
@@ -43,6 +52,7 @@ const record = (command, target, value, insertBeforeLastCommand) => {
     },
   }
   recordedSteps.push(payload.payload)
+  notifyUiUpdate('record')
   if (socket && socket.readyState === 'open') {
     return socket.send(JSON.stringify(payload))
   }
@@ -73,12 +83,14 @@ const attach = ({ sessionId, hasRecorded = false }) => {
   window.hasRecorded = hasRecorded
   activeSessionId = sessionId
   isRecording = true
+  notifyUiUpdate('attach')
   return window.recorder.attach(sessionId)
 }
 
 const detach = () => {
   isRecording = false
   activeSessionId = null
+  notifyUiUpdate('detach')
   return window.recorder.detach()
 }
 
@@ -89,6 +101,93 @@ const normalizeUrl = rawUrl => {
     return trimmed
   }
   return `https://${trimmed}`
+}
+
+const clearSiteData = async rawUrl => {
+  if (!browser.browsingData || typeof browser.browsingData.remove !== 'function') {
+    return { ok: false, error: 'browsingData API is unavailable.' }
+  }
+
+  const normalizedUrl = normalizeUrl(rawUrl)
+  let hostname
+  let origin
+  try {
+    const parsed = new URL(normalizedUrl)
+    origin = parsed.origin
+    hostname = parsed.hostname
+  } catch (error) {
+    return { ok: false, error: `Invalid URL for clearing site data: ${rawUrl}` }
+  }
+
+  try {
+    const dataToRemove = {
+      cookies: true,
+      indexedDB: true,
+      localStorage: true,
+    }
+
+    const hostnameCandidates = new Set()
+    const addHostname = value => {
+      if (!value || value === 'localhost') return
+      hostnameCandidates.add(value)
+    }
+
+    addHostname(hostname)
+    if (hostname.startsWith('www.')) {
+      addHostname(hostname.slice(4))
+    } else {
+      addHostname(`www.${hostname}`)
+    }
+
+    const parts = hostname.split('.').filter(Boolean)
+    if (parts.length >= 2) {
+      addHostname(parts.slice(-2).join('.'))
+    }
+
+    const originCandidates = new Set([origin])
+    hostnameCandidates.forEach(host => {
+      originCandidates.add(`https://${host}`)
+      originCandidates.add(`http://${host}`)
+    })
+
+    try {
+      await browser.browsingData.remove(
+        {
+          since: 0,
+          hostnames: Array.from(hostnameCandidates),
+        },
+        dataToRemove
+      )
+    } catch (hostnamesError) {
+      await browser.browsingData.remove(
+        {
+          since: 0,
+          origins: Array.from(originCandidates),
+        },
+        dataToRemove
+      )
+    }
+
+    if (typeof browser.browsingData.removeCache === 'function') {
+      await browser.browsingData.removeCache({ since: 0 })
+    } else {
+      await browser.browsingData.remove(
+        {
+          since: 0,
+        },
+        {
+          cache: true,
+        }
+      )
+    }
+
+    return { ok: true }
+  } catch (error) {
+    return {
+      ok: false,
+      error: error && error.message ? error.message : String(error),
+    }
+  }
 }
 
 const waitForTabReady = tabId =>
@@ -113,17 +212,33 @@ const waitForTabReady = tabId =>
     browser.tabs.onUpdated.addListener(listener)
   })
 
-const startRecording = async (url, sessionIdOverride) => {
+const startRecording = async (url, sessionIdOverride, options = {}) => {
   const sessionId =
     sessionIdOverride ||
     `tmr-${Date.now().toString(36)}-${Math.random()
       .toString(36)
       .slice(2, 8)}`
   const startUrl = normalizeUrl(url)
+  const startHostname = (() => {
+    try {
+      return new URL(startUrl).hostname
+    } catch (e) {
+      return null
+    }
+  })()
+
+  if (options.clearSiteData === true) {
+    const preClearResult = await clearSiteData(startUrl)
+    if (!preClearResult.ok) {
+      return preClearResult
+    }
+  }
+
   const createOptions = {
     url: startUrl,
     type: 'normal',
     focused: true,
+    state: 'maximized',
   }
   const win = await browser.windows.create(createOptions)
   const tabs = await browser.tabs.query({
@@ -134,7 +249,32 @@ const startRecording = async (url, sessionIdOverride) => {
   if (!tab) {
     return { ok: false, error: 'No active tab found in new window.' }
   }
+
   await waitForTabReady(tab.id)
+
+  if (options.clearSiteData === true) {
+    const liveTab = await browser.tabs.get(tab.id)
+    const finalUrl = liveTab && liveTab.url ? liveTab.url : startUrl
+    let finalHostname = null
+    try {
+      finalHostname = new URL(finalUrl).hostname
+    } catch (e) {
+      finalHostname = null
+    }
+
+    if (finalHostname && finalHostname !== startHostname) {
+      const postClearResult = await clearSiteData(finalUrl)
+      if (!postClearResult.ok) {
+        return postClearResult
+      }
+
+      await browser.tabs.reload(tab.id, {
+        bypassCache: true,
+      })
+      await waitForTabReady(tab.id)
+    }
+  }
+
   window.hasRecorded = false
   activeSessionId = sessionId
   isRecording = true
@@ -157,6 +297,7 @@ const steps = () => ({
 
 const clear = () => {
   recordedSteps.length = 0
+  notifyUiUpdate('clear')
   return { ok: true }
 }
 
@@ -174,6 +315,7 @@ const replaceSteps = nextSteps => {
       insertBeforeLastCommand: step.insertBeforeLastCommand,
     })
   })
+  notifyUiUpdate('replaceSteps')
   return {
     ok: true,
     steps: recordedSteps.slice(),
@@ -198,37 +340,47 @@ const openUiWindow = async () => {
   uiWindowId = win.id
 }
 
-browser.windows.onBoundsChanged.addListener(async win => {
-  if (!uiWindowId || win.id !== uiWindowId || isUpdatingUiWindowBounds) {
-    return
-  }
+if (
+  browser.windows.onBoundsChanged &&
+  typeof browser.windows.onBoundsChanged.addListener === 'function'
+) {
+  browser.windows.onBoundsChanged.addListener(async win => {
+    if (!uiWindowId || win.id !== uiWindowId || isUpdatingUiWindowBounds) {
+      return
+    }
 
-  const nextWidth = Math.max(win.width || MIN_UI_WINDOW_WIDTH, MIN_UI_WINDOW_WIDTH)
-  const nextHeight = Math.max(
-    win.height || MIN_UI_WINDOW_HEIGHT,
-    MIN_UI_WINDOW_HEIGHT
-  )
+    const nextWidth = Math.max(
+      win.width || MIN_UI_WINDOW_WIDTH,
+      MIN_UI_WINDOW_WIDTH
+    )
+    const nextHeight = Math.max(
+      win.height || MIN_UI_WINDOW_HEIGHT,
+      MIN_UI_WINDOW_HEIGHT
+    )
 
-  if (nextWidth === win.width && nextHeight === win.height) {
-    return
-  }
+    if (nextWidth === win.width && nextHeight === win.height) {
+      return
+    }
 
-  isUpdatingUiWindowBounds = true
-  try {
-    await browser.windows.update(uiWindowId, {
-      width: nextWidth,
-      height: nextHeight,
-    })
-  } finally {
-    isUpdatingUiWindowBounds = false
-  }
-})
+    isUpdatingUiWindowBounds = true
+    try {
+      await browser.windows.update(uiWindowId, {
+        width: nextWidth,
+        height: nextHeight,
+      })
+    } finally {
+      isUpdatingUiWindowBounds = false
+    }
+  })
+}
 
-browser.windows.onRemoved.addListener(windowId => {
-  if (windowId === uiWindowId) {
-    uiWindowId = null
-  }
-})
+if (browser.windows.onRemoved && typeof browser.windows.onRemoved.addListener === 'function') {
+  browser.windows.onRemoved.addListener(windowId => {
+    if (windowId === uiWindowId) {
+      uiWindowId = null
+    }
+  })
+}
 
 browser.browserAction.onClicked.addListener(() => {
   openUiWindow()
@@ -287,7 +439,9 @@ socket.on('open', () => {
 browser.runtime.onMessage.addListener(message => {
   if (!message || !message.tmrRecorder) return
   if (message.tmrRecorder === 'start') {
-    return startRecording(message.url, message.sessionId).catch(err => ({
+    return startRecording(message.url, message.sessionId, {
+      clearSiteData: message.clearSiteData === true,
+    }).catch(err => ({
       ok: false,
       error: err && err.message ? err.message : String(err),
     }))
@@ -310,6 +464,9 @@ browser.runtime.onMessage.addListener(message => {
   if (message.tmrRecorder === 'replaceSteps') {
     return Promise.resolve(replaceSteps(message.steps))
   }
+  if (message.tmrRecorder === 'clearSiteData') {
+    return clearSiteData(message.url)
+  }
 })
 
 window.tmrApi = {
@@ -318,5 +475,6 @@ window.tmrApi = {
   status,
   steps,
   clear,
+  clearSiteData,
   replaceSteps,
 }
