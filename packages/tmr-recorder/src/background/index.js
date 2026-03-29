@@ -26,6 +26,7 @@ const socket = eio(window.socketUrl || 'ws://localhost:4445')
 const recordedSteps = []
 let activeSessionId = null
 let isRecording = false
+let isPaused = false
 let uiWindowId = null
 const MIN_UI_WINDOW_WIDTH = 560
 const MIN_UI_WINDOW_HEIGHT = 640
@@ -41,6 +42,7 @@ const notifyUiUpdate = reason => {
 }
 
 const record = (command, target, value, insertBeforeLastCommand) => {
+  if (isPaused) return
   window.hasRecorded = true
   const payload = {
     type: 'record',
@@ -83,12 +85,14 @@ const attach = ({ sessionId, hasRecorded = false }) => {
   window.hasRecorded = hasRecorded
   activeSessionId = sessionId
   isRecording = true
+  isPaused = false
   notifyUiUpdate('attach')
   return window.recorder.attach(sessionId)
 }
 
 const detach = () => {
   isRecording = false
+  isPaused = false
   activeSessionId = null
   notifyUiUpdate('detach')
   return window.recorder.detach()
@@ -278,14 +282,34 @@ const startRecording = async (url, sessionIdOverride, options = {}) => {
   window.hasRecorded = false
   activeSessionId = sessionId
   isRecording = true
+  isPaused = false
   await window.recorder.attachWithTab(sessionId, tab)
   record('open', [[startUrl]], '')
   return { ok: true, sessionId }
 }
 
+const pauseRecording = () => {
+  if (!isRecording) {
+    return { ok: false, error: 'Cannot pause when recording is not active.' }
+  }
+  isPaused = true
+  notifyUiUpdate('pause')
+  return { ok: true, isPaused }
+}
+
+const resumeRecording = () => {
+  if (!isRecording) {
+    return { ok: false, error: 'Cannot resume when recording is not active.' }
+  }
+  isPaused = false
+  notifyUiUpdate('resume')
+  return { ok: true, isPaused }
+}
+
 const status = () => ({
   ok: true,
   isRecording,
+  isPaused,
   sessionId: activeSessionId,
   count: recordedSteps.length,
 })
@@ -452,6 +476,12 @@ browser.runtime.onMessage.addListener(message => {
       error: err && err.message ? err.message : String(err),
     }))
   }
+  if (message.tmrRecorder === 'pause') {
+    return Promise.resolve(pauseRecording())
+  }
+  if (message.tmrRecorder === 'resume') {
+    return Promise.resolve(resumeRecording())
+  }
   if (message.tmrRecorder === 'status') {
     return Promise.resolve(status())
   }
@@ -472,6 +502,8 @@ browser.runtime.onMessage.addListener(message => {
 window.tmrApi = {
   start: startRecording,
   stop: () => detach().then(() => ({ ok: true })),
+  pause: pauseRecording,
+  resume: resumeRecording,
   status,
   steps,
   clear,
