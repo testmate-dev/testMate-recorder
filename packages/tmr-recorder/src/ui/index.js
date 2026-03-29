@@ -7,6 +7,7 @@ const api = typeof browser !== 'undefined' ? browser : chrome
 const statusEl = document.getElementById('status')
 const stepsEl = document.getElementById('steps')
 const startBtn = document.getElementById('start')
+const pauseBtn = document.getElementById('pause')
 const stopBtn = document.getElementById('stop')
 const clearBtn = document.getElementById('clear')
 const modal = document.getElementById('modal')
@@ -25,6 +26,7 @@ let moveRafId = null
 let lastStepsFingerprint = ''
 let refreshInFlight = false
 let refreshQueued = false
+let currentIsPaused = false
 
 const stepKey = step =>
   JSON.stringify([
@@ -411,11 +413,19 @@ const refresh = async () => {
     if (!status || status.ok === false) {
       statusEl.textContent = 'Background unavailable'
       startBtn.disabled = false
+      pauseBtn.disabled = true
       stopBtn.disabled = true
       return
     }
-    statusEl.textContent = status.isRecording ? 'Recording' : 'Idle'
+    currentIsPaused = status.isPaused === true
+    if (!status.isRecording) {
+      statusEl.textContent = 'Idle'
+    } else {
+      statusEl.textContent = currentIsPaused ? 'Paused' : 'Recording'
+    }
     startBtn.disabled = status.isRecording
+    pauseBtn.disabled = !status.isRecording
+    pauseBtn.textContent = currentIsPaused ? 'Resume' : 'Pause'
     stopBtn.disabled = !status.isRecording
     if (!isDragging && steps && steps.ok !== false) {
       const nextStepsFingerprint = fingerprintSteps(steps.steps)
@@ -455,6 +465,16 @@ startBtn.addEventListener('click', async () => {
 
 stopBtn.addEventListener('click', async () => {
   await callBg('stop')
+  await refresh()
+})
+
+pauseBtn.addEventListener('click', async () => {
+  if (pauseBtn.disabled) return
+  if (currentIsPaused) {
+    await callBg('resume')
+  } else {
+    await callBg('pause')
+  }
   await refresh()
 })
 

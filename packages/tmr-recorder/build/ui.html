@@ -46,7 +46,7 @@
       }
       .actions {
         display: grid;
-        grid-template-columns: 1fr 1fr 1fr;
+        grid-template-columns: 1fr 1fr 1fr 1fr;
         gap: 10px;
         margin-bottom: 12px;
       }
@@ -67,6 +67,11 @@
         background: #b23b3b;
         color: #fff;
         border-color: #b23b3b;
+      }
+      button.pause {
+        background: #b48a2f;
+        color: #fff;
+        border-color: #b48a2f;
       }
       button:disabled {
         opacity: 0.5;
@@ -249,6 +254,7 @@
 
     <div class="actions">
       <button id="start" class="primary">Record</button>
+      <button id="pause" class="pause">Pause</button>
       <button id="stop" class="stop">Stop</button>
       <button id="clear">Clear</button>
     </div>
