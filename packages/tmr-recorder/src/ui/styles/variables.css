@@ -1,0 +1,20 @@
+:root {
+  color-scheme: light;
+  font-family: 'IBM Plex Sans', 'Segoe UI', Arial, sans-serif;
+  --color-primary: hsla(167, 50%, 24%, 1);
+  --color-stop: hsla(0, 50%, 46%, 1);
+  --color-copy: hsla(41, 58%, 44%, 1);
+  --color-cut: hsla(284, 38%, 38%, 1);
+  --border-color-primary: hsla(167, 36%, 71%, 1);
+  --border-color-stop: hsla(0, 46%, 74%, 1);
+  --border-color-copy: hsla(41, 48%, 73%, 1);
+  --border-color-cut: hsla(284, 32%, 73%, 1);
+  --bg-color-primary-soft: hsla(167, 58%, 96%, 1);
+  --bg-color-primary-hover: hsla(167, 62%, 92%, 1);
+  --bg-color-stop-soft: hsla(0, 70%, 97%, 1);
+  --bg-color-stop-hover: hsla(0, 75%, 94%, 1);
+  --bg-color-copy-soft: hsla(41, 100%, 97%, 1);
+  --bg-color-copy-hover: hsla(41, 100%, 93%, 1);
+  --bg-color-cut-soft: hsla(284, 40%, 97%, 1);
+  --bg-color-cut-hover: hsla(284, 50%, 93%, 1);
+}
