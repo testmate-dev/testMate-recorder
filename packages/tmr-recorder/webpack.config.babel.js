@@ -18,6 +18,7 @@
 const path = require('path')
 //const ExtractTextPlugin = require('extract-text-webpack-plugin')
 const CopyWebpackPlugin = require('copy-webpack-plugin')
+const { VueLoaderPlugin } = require('vue-loader')
 
 const isProduction = process.env.NODE_ENV === 'production'
 
@@ -28,7 +29,7 @@ module.exports = {
   entry: {
     background: ['./background'],
     record: ['./content'],
-    ui: ['./ui'],
+    ui: ['./ui/main.js'],
   },
   output: {
     path: path.resolve(__dirname, 'build/assets'),
@@ -37,10 +38,21 @@ module.exports = {
     libraryTarget: 'umd',
   },
   resolve: {
-    extensions: ['.js', '.json'],
+    extensions: ['.js', '.json', '.vue'],
+    alias: {
+      vue$: 'vue/dist/vue.esm-bundler.js',
+    },
   },
   module: {
     rules: [
+      {
+        test: /\.vue$/,
+        loader: 'vue-loader',
+      },
+      {
+        test: /\.css$/,
+        use: ['style-loader', 'css-loader'],
+      },
       {
         // "oneOf" will traverse all following loaders until one will
         // match the requirements. When no loader matches it will fall
@@ -73,6 +85,7 @@ module.exports = {
     ],
   },
   plugins: [].concat([
+    new VueLoaderPlugin(),
     // Copy non-umd assets to vendor
     new CopyWebpackPlugin({
       patterns: [
